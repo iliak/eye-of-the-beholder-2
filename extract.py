@@ -5,8 +5,8 @@ import struct
 import json
 from PIL import Image, ImageDraw
 
-from enum import Enum, IntFlag
 import tokens
+from enum import Enum, IntFlag
 from location import Location
 from monster import Monster
 
@@ -360,6 +360,15 @@ class BinaryReader:
         """
 
         self.handle.seek(-offset, 1)
+
+    def seek(self, offset):
+        """
+        Set offset
+        :param offset:
+        :return:
+        """
+
+        self.handle.seek(offset)
 
 
 class Dice:
@@ -1300,14 +1309,19 @@ class Maze:
 
 
 class Champion(object):
-    pass
+
+    name = None
+
+
+    def __str__(self):
+        return self.name
 
 
 class Savegame:
 
     def __init__(self, filename):
         self._filename = filename
-        self._champions = []
+        self.champions = []
 
         with BinaryReader(filename) as reader:
             self.name = reader.read_string(20)
@@ -1316,63 +1330,108 @@ class Savegame:
             for i in range(6):
                 champion = Champion()
                 champion.id = reader.read_ubyte()
-                champion.active = reader.read_ubyte()
+                champion.flags = reader.read_ubyte()
                 champion.name = reader.read_string(11)
-                champion.strength = reader.read_ubyte(2)
-                champion.strength_extra = reader.read_ubyte(2)
+                champion.strength = {
+                    "current": reader.read_byte(),
+                    "max": reader.read_byte()
+                }
+                champion.strength_extra = {
+                    "current": reader.read_byte(),
+                    "max": reader.read_byte()
+                }
 
-                champion.intelligence = reader.read_ubyte(2)
-                champion.wisdom = reader.read_ubyte(2)
-                champion.dexterity = reader.read_ubyte(2)
-                champion.constitution = reader.read_ubyte(2)
-                champion.charisma = reader.read_ubyte(2)
-                champion.hitpoint = reader.read_ushort(2)
+                champion.intelligence = reader.read_byte(2)
+                champion.wisdom = reader.read_byte(2)
+                champion.dexterity = reader.read_byte(2)
+                champion.constitution = reader.read_byte(2)
+                champion.charisma = reader.read_byte(2)
+                champion.hitpoint = reader.read_short(2)
                 champion.armorclass = reader.read_byte(1)
-                champion.pad_01 = reader.read_ubyte()
+                champion.disabled_slots = reader.read_byte()
 
-                champion.race = reader.read_ubyte()
-                champion.class_ = reader.read_ubyte()
-                champion.alignment = reader.read_ubyte()
-                champion.portrait = reader.read_ubyte()
-                champion.food = reader.read_ubyte()
-                champion.level = reader.read_ubyte(3)
+                champion.race = races[reader.read_byte()]
+                champion.class_ = classes[reader.read_byte()]
+                champion.alignment = alignments[reader.read_byte()]
+                champion.portrait = reader.read_byte()
+                champion.food = reader.read_byte()
+                champion.level = reader.read_byte(3)
 
                 champion.experience = reader.read_uint(3)
 
-                champion.pad_02 = reader.read_ubyte(5)
+                champion.pad_01 = reader.read_ubyte(4)
 
-                champion.spells_available = reader.read_ubyte(159)
-                champion.spells_learned = reader.read_byte(4)
+                champion.mage_spells = reader.read_byte(80)
+                champion.cleric_spells = reader.read_byte(80)
+                champion.mage_spells_available_flags = reader.read_ushort()
 
-                champion.hands = reader.read_ushort(2)
+                champion.pad_02 = reader.read_ushort(1)
 
+                champion.hand_left = reader.read_ushort()
+                champion.hand_right = reader.read_ushort()
                 champion.backpack = reader.read_ushort(14)
-                champion.quiver = reader.read_ubyte()
-                champion.armor = reader.read_byte()
-                champion.bracers = reader.read_ushort()
+                champion.armor = reader.read_ushort()
+                champion.bracers = reader.read_ushort(2)
                 champion.helmet = reader.read_ushort()
                 champion.medaillon = reader.read_ushort()
                 champion.boots = reader.read_ushort()
                 champion.belt = reader.read_ushort(3)
                 champion.ring = reader.read_ushort(2)
 
-                champion.pad_02 = reader.read_ubyte(72)
-                self._champions.append(champion)
+                champion.timers = reader.read_ushort(10)
+                champion.events = reader.read_ushort(10)
+                champion.effects_remainder = reader.read_ushort(4)
+                champion.effect_flags = reader.read_ushort()
+
+                champion.damage_taken = reader.read_byte()
+                champion.slot_status = reader.read_byte(5)
+
+                champion.pad_03 = reader.read_ubyte(14)
+                self.champions.append(champion)
                 i = 1
 
             # Game states
             self.level = reader.read_ushort()
-            self.sub_level = reader.read_ushort()
-            self.position = reader.read_ushort()
-            self.dir = reader.read_ushort()
-            self.sub_position = reader.read_ushort()
+            self.sub_position = reader.read_short()
+            self.position = Location(reader)
+            self.direction = directions[reader.read_ushort()]
             self.item_in_hand = reader.read_ushort()
-            self.level_bits = reader.read_uint()
-            self.spells_flags = reader.read_uint()
-            self.pad_01 = reader.read_ubyte()
-            self.monster_near = reader.read_ubyte()
-            self.level_flags = reader.read_ubyte(64)
-            self.world_flags = reader.read_uint()
+            self.has_tmp_data = reader.read_ushort()
+            self.party_effect_flags = reader.read_ushort()
+            self.pad_02 = reader.read_byte()
+
+            # state
+            self.prevent_rest = reader.read_byte()
+            self.state_flags = reader.read_ushort(18)
+
+            self.pad_03 = reader.read_byte(40)
+            # items
+            self.items = []
+            item_names = assets['item_names']
+            # reader.seek(2182)
+            # Offset 2182
+            for i in range(600):
+                item = {
+                    "name_unidentified" : item_names[reader.read_ubyte()],
+                    "name": item_names[reader.read_ubyte()],
+                    "flags": reader.read_ubyte(),
+                    "icon": reader.read_byte(),
+                    "type": reader.read_byte(),
+                    "position": reader.read_byte(),
+                    "location": Location(reader),
+                    "next": reader.read_short(),
+                    "previous": reader.read_short(),
+                    "level": reader.read_ubyte(),
+                    "value": reader.read_byte(),
+                }
+                self.items.append(item)
+
+            # self.level_bits = reader.read_uint()
+            # self.spells_flags = reader.read_uint()
+            # self.pad_01 = reader.read_ubyte()
+            # self.monster_near = reader.read_ubyte()
+            # self.level_flags = reader.read_ubyte(64)
+            # self.world_flags = reader.read_uint()
 
             i = 1
 
@@ -1617,6 +1676,12 @@ if __name__ == '__main__':
     assets['items'] = decode_items()
     dump('items.json', assets['items'])
 
+
+    # Savegame
+    savegame = Savegame('data/EOBDATA3.SAV')
+
+    exit()
+
     # Rebuild items in levels
     level_items = [{
         'flags': str(ItemFlags(item['flags'])),
@@ -1643,8 +1708,6 @@ if __name__ == '__main__':
 
     exit()
 
-    # Savegame
-    savegame = Savegame('extractor/data/EOBDATA2.SAV')
 
 
     print(json.dumps({
@@ -1655,7 +1718,7 @@ if __name__ == '__main__':
         },
         'decorations': {
             'definitions': assets['decorations'],
-            'rectangles': dec_rectangles,
+            # 'rectangles': assets['dec_rectangles'],
         },
     }, indent=2, sort_keys=False))
 
