@@ -1,0 +1,1661 @@
+#!/usr/bin/env python3.6
+
+import os
+import struct
+import json
+from PIL import Image, ImageDraw
+
+from enum import Enum, IntFlag
+import tokens
+from location import Location
+from monster import Monster
+
+# TODO: Not sure about this one...
+directions = ['north', 'east', 'south', 'west']
+
+classes = {
+    0x00: "Fighter",
+    0x01: "Ranger",
+    0x02: "Paladin",
+    0x03: "Mage",
+    0x04: "Cleric",
+    0x05: "Thief",
+    0x06: "Fighter/Cleric",
+    0x07: "Fighter/Thief",
+    0x08: "Fighter/Mage",
+    0x09: "Fighter/Mage/Thief",
+    0x0A: "Thief/Mage",
+    0x0B: "Cleric/Thief",
+    0x0C: "Fighter/Cleric/Mage",
+    0x0D: "Ranger/Cleric",
+    0x0E: "Cleric/Mage",
+    0x0F: '0x0F',
+    0x10: '0x10'
+}
+
+races = {
+    0x00: 'human male',
+    0x01: 'human female',
+    0x02: 'elf male',
+    0x03: 'elf female',
+    0x04: 'half-elf male',
+    0x05: 'half-elf female',
+    0x06: 'dwarf male',
+    0x07: 'dwarf female',
+    0x08: 'gnome male',
+    0x09: 'gnome female',
+    0x0A: 'halfling male',
+    0x0B: 'halfling female',
+}
+
+
+alignments = {
+    0x00: "Lawful Good",
+    0x01: "Neutral Good",
+    0x02: "Chaotic Good",
+    0x03: "Lawful Neutral",
+    0x04: "True Neutral",
+    0x05: "Chaotic Neutral",
+    0x06: "Lawful Evil",
+    0x07: "Neutral Evil",
+    0x08: "Chaotic Evil",
+}
+
+
+class ClassUage(IntFlag):
+    """
+
+    """
+    Null = 0x00
+    Fighter = 0x01
+    Mage = 0x02
+    Cleric = 0x04
+    Thief = 0x08
+
+
+class HandFlags(IntFlag):
+    """
+
+    """
+    Primary = 0x0,
+    Secondary = 0x1,
+    Both = 0x2,
+
+
+class ItemFlags(IntFlag):
+    """
+    Item's flags
+    """
+    Nothing = 0x00,
+    Flag01 = 0x01
+    ArmorBonus = 0x02
+    Flag04 = 0x04           # Enchanted ??
+    isVampiric = 0x08       # Sucks damage points from target to attacker
+    SpeedBonus = 0x10
+    isCursed = 0x20
+    isIdentified = 0x40
+    GlowMagic = 0x80
+
+
+class ProfessionFlags(IntFlag):
+    """
+
+    """
+    Fighter = 0x01    #
+    Ranger = 0x02    #
+    Paladin = 0x04    #
+    Mage = 0x08    #
+    Cleric = 0x10    #
+    Thief = 0x20    #
+
+
+class ItemSlotFlags(IntFlag):
+    """
+
+    """
+    Quiver = 0x01,
+    Armour = 0x02,
+    Bracers = 0x04,
+    Backpack = 0x08,
+    Boots = 0x10,
+    Helmet = 0x20,
+    Necklace = 0x40,
+    Belt = 0x80,
+    Ring = 0x100,
+
+
+ItemAction = {
+    '0': 'Nothing',
+    '1': '1',
+    '2': 'Ammunition',
+    '3': 'Use ammunition',
+    '4': 'Amulet | coin | eye of talon...',
+    '5': 'Open mage spell window',
+    '6': 'Open cleric spell window',
+    '7': "Food",
+    '8': "Bones",
+    '9': "Glass sphere | Magic dust | Scroll",
+    '10': "Scroll",
+    '11': "Parchment (something to read)",
+    '12': "Stone item (Cross, Dagger, Gem...)",
+    '13': "Key",
+    '14': "Potion",
+    '15': "Gem",
+    '18': "0x12",
+    '19': "Blow horn (N/S/W/E wind...)",
+    '20': "Amulet of Life or Death",
+    '128': "Range Party member",
+    '129': "Range Close",
+    '130': "Range Medium",
+    '131': "Range Long",
+    '132': "Lock picks",
+    '138': "Amulet",
+    '144': "Crimson ring",
+    '146': "Wand",
+}
+
+
+class BinaryReader:
+    """
+
+    """
+    def __init__(self, filename):
+
+        self.filename = filename
+        self.handle = None
+
+    def __enter__(self):
+        """
+
+        :return:
+        """
+        self.handle = open(self.filename, 'rb')
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+
+        :param exc_type:
+        :param exc_val:
+        :param exc_tb:
+        :return:
+        """
+        if self.handle:
+            self.handle.close()
+            self.handle = None
+
+    @property
+    def offset(self):
+        """
+
+        :return:
+        """
+        if not self.handle:
+            return None
+
+        return self.handle.tell()
+
+    @property
+    def offset_hex(self):
+        """
+
+        :return:
+        """
+        return hex(self.offset)
+
+    def read_ubyte(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        val = struct.unpack('{count}B'.format(count=count), self.handle.read(count))
+
+        if count == 1:
+            return val[0]
+        return val
+
+    def read_byte(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        val = struct.unpack('{count}b'.format(count=count), self.handle.read(count))
+        if count == 1:
+            return val[0]
+        return val
+
+    def peek_ubyte(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        s = struct.unpack('{count}B'.format(count=count), self.handle.read(count))
+        self.handle.seek(-count, 1)
+        if count == 1:
+            return s[0]
+
+        return list(s[:count])
+
+    def peek_byte(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        value = struct.unpack('{count}b'.format(count=count), self.handle.read(count))[0]
+        self.handle.seek(-count, 1)
+        return value
+
+    def read_ushort(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        val = struct.unpack('{count}H'.format(count=count), self.handle.read(count*2))
+        if count == 1:
+            return val[0]
+        return val
+
+    def read_short(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        val = struct.unpack('{count}h'.format(count=count), self.handle.read(count*2))
+        if count == 1:
+            return val[0]
+        return val
+
+    def peek_ushort(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        value = struct.unpack('{count}H'.format(count=count), self.handle.read(count*2))[0]
+        self.handle.seek(-count * 2, 1)
+        return value
+
+    def peek_short(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        value = struct.unpack('{count}h'.format(count=count), self.handle.read(count*2))[0]
+        self.handle.seek(-count * 2, 1)
+        return value
+
+    def read_uint(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        val = struct.unpack('{count}I'.format(count=count), self.handle.read(count*4))
+        if count == 1:
+            return val[0]
+        return val
+
+    def read_int(self, count=1):
+        """
+
+        :param count:
+        :return:
+        """
+        val = struct.unpack('{count}i'.format(count=count), self.handle.read(count*4))[0]
+        if count == 1:
+            return val[0]
+        return val
+
+    def read_string(self, length=0):
+        """
+
+        :param length:
+        :return:
+        """
+
+        buff = struct.unpack('{length}s'.format(length=length), self.handle.read(length))[0]
+
+        string = ''
+        for c in buff:
+            if c == 0:
+                break
+            string += chr(c)
+
+        return string
+
+    def peek_string(self, length=0):
+        str = self.read_string(length)
+        self.rewind(length)
+        return str
+
+    def search_string(self):
+        """
+
+        :return:
+        """
+
+        string = ''
+
+        while True:
+            b = self.read_ubyte()
+
+            if b == 0x0:
+                return string
+
+            string += chr(b)
+
+    def rewind(self, offset):
+        """
+        Move offset backward
+        :param offset:
+        :return:
+        """
+
+        self.handle.seek(-offset, 1)
+
+
+class Dice:
+    """
+
+    """
+    def __init__(self, reader=None):
+        self.rolls = 0
+        self.sides = 0
+        self.base = 0
+
+        self.process(reader)
+
+    def process(self, reader):
+        """
+
+        :param reader:
+        :return:
+        """
+        if not reader:
+            return
+
+        self.rolls = reader.read_ubyte()
+        self.sides = reader.read_ubyte()
+        self.base = reader.read_ubyte()
+
+    def decode(self):
+        return {
+            'rolls': self.rolls,
+            'sides': self.sides,
+            'base': self.base,
+        }
+
+    def __str__(self):
+
+        return "({rolls}d{sides})+{base}".format(rolls=self.rolls, sides=self.sides, base=self.base)
+
+
+class Rectangle:
+    """
+
+    """
+    x = 0
+    y = 0
+    width = 0
+    height = 0
+
+    def decode(self):
+        return {
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height
+        }
+
+    def __str__(self):
+        """
+
+        :return:
+        """
+
+        return "[x:{x} y:{y} - width:{width} height:{height}]".format(
+            x=self.x, y=self.y, width=self.width, height=self.height
+        )
+
+
+class Point:
+    """
+
+    """
+    x = 0
+    y = 0
+
+    def decode(self):
+        return {
+            "x": self.x,
+            "y": self.y,
+        }
+
+    def __str__(self):
+        """
+
+        :return:
+        """
+        return "[x:{x} y:{y}]".format(x=self.x, y=self.y)
+
+
+class WallMapping:
+    """
+    Wall-Types: Who can pass
+    WF_PASSNONE			0x00  Can be passed by no one
+    WF_PARTYPASS		0x01  Can be passed by the player, big item
+    WF_SMALLPASS		0x02  Can be passed by a small item
+    WF_MONSTERPASS		0x04  Can be passed by a monster
+    WF_PASSALL			0x07  Can be passed by all
+    WF_ISDOOR			0x08  Is a door
+    WF_DOOROPEN			0x10  The door is open
+    WF_DOORCLOSED		0x20  The door is closed
+    WF_DOORKNOB			0x40  The door has a knob
+    WF_ONLYDEC			0x80  No wall, only decoration, items visible
+
+    Wall-Types: Kind
+    WT_SOLID			0x01  Is a solid wall, draw top
+    WT_SELFDRAW			0x02  Is a stair, for example, no bottom
+    WT_DOORSTUCK		0x04  The door is stuck
+    WT_DOORMOVES		0x08  The door is opening
+    WT_DOOROPEN			0x10  The door is open
+    WT_DOORCLOSED		0x20  The door is closed
+    """
+
+    def __init__(self):
+        self.index = 0              # This is the index used by the .maz file
+        self.type = 0               # Index to what backdrop wall type that is being used
+        self.decorationId = 0       # Index to an optional overlay decoration image in the DecorationData.decorations
+        # array in the [[eob.dat |.dat]] files
+        self.eventMask = 0          #
+        self.flags = 0              #
+
+    @property
+    def is_blocking(self):
+
+        return self.flags & 0x00 == 0x00
+
+    @property
+    def is_door(self):
+
+        return self.flags & 0x08 == 0x08
+
+    def __str__(self):
+
+        type = ""
+        if self.type & 0x01 == 0x01: type += "WT_SOLID, "
+        if self.type & 0x02 == 0x02: type += "WT_SELFDRAW, "
+        if self.type & 0x04 == 0x04: type += "WT_DOORSTUCK, "
+        if self.type & 0x08 == 0x08: type += "WT_DOORMOVES, "
+        if self.type & 0x10 == 0x10: type += "WT_DOOROPEN, "
+        if self.type & 0x20 == 0x20: type += "WT_DOORCLOSED, "
+
+        flags = ""
+        if self.flags & 0x00 == 0x00: flags += "WF_PASSNONE, "
+        if self.flags & 0x01 == 0x01: flags += "WF_PARTYPASS, "
+        if self.flags & 0x02 == 0x02: flags += "WF_SMALLPASS, "
+        if self.flags & 0x04 == 0x04: flags += "WF_MONSTERPASS, "
+        if self.flags & 0x07 == 0x07: flags += "WF_PASSALL, "
+        if self.flags & 0x08 == 0x08: flags += "WF_ISDOOR, "
+        if self.flags & 0x10 == 0x10: flags += "WF_DOOROPEN, "
+        if self.flags & 0x20 == 0x20: flags += "WF_DOORCLOSED, "
+        if self.flags & 0x40 == 0x40: flags += "WF_DOORKNOB, "
+        if self.flags & 0x80 == 0x80: flags += "WF_ONLYDEC, "
+
+        return "Type: {type} - Flags: {flags}".format(type=type, flags=flags)
+
+
+class DecorationInfo:
+    """
+
+    """
+
+    def __init__(self):
+        self.files = None
+        self.wallMapping = None
+
+    def __str__(self):
+
+        return "File '{file}' with mapping '{mapping}'".format(
+            file=self.files, mapping=self.wallMapping
+        )
+
+
+class DecorationFilename:
+    """
+    """
+
+    def __init__(self):
+        self.gfx = ""
+        self.dec = ""
+
+
+class ScriptTokens(Enum):
+    TOKEN_SET_WALL = 0xff,
+    TOKEN_CHANGE_WALL = 0xfe,
+    TOKEN_OPEN_DOOR = 0xfd,
+    TOKEN_CLOSE_DOOR = 0xfc,
+    TOKEN_CREATE_MONSTER = 0xfb,
+    TOKEN_TELEPORT = 0xfa,
+    TOKEN_STEAL_SMALL_ITEMS = 0xf9,
+    TOKEN_MESSAGE = 0xf8,
+    TOKEN_SET_FLAG = 0xf7,
+    TOKEN_SOUND = 0xf6,
+    TOKEN_CLEAR_FLAG = 0xf5,
+    TOKEN_HEAL = 0xf4,
+    TOKEN_DAMAGE = 0xf3,
+    TOKEN_JUMP = 0xf2,
+    TOKEN_END = 0xf1,
+    TOKEN_RETURN = 0xf0,
+    TOKEN_CALL = 0xef,
+    TOKEN_CONDITIONAL = 0xee,
+    TOKEN_CONSUME = 0xed,
+    TOKEN_CHANGE_LEVEL = 0xec,
+    TOKEN_GIVE_XP = 0xeb,
+    TOKEN_NEW_ITEM = 0xea,
+    TOKEN_LAUNCHER = 0xe9,
+    TOKEN_TURN = 0xe8,
+    TOKEN_IDENTIFY_ITEMS = 0xe7,
+    TOKEN_ENCOUNTER = 0xe6,
+    TOKEN_WAIT = 0xe5,
+
+
+class ConditionValue(Enum):
+    OPERATOR_EQ = 0xff,
+    OPERATOR_NEQ = 0xfe,
+    OPERATOR_LT = 0xfd,
+    OPERATOR_LTE = 0xfc,
+    OPERATOR_GT = 0xfb,
+    OPERATOR_GTE = 0xfa,
+    OPERATOR_AND = 0xf9,
+    OPERATOR_OR = 0xf8,
+    VALUE_GET_WALL_NUMBER = 0xf7,
+    VALUE_COUNT_ITEMS = 0xf5,
+    VALUE_COUNT_MONSTERS = 0xf3,
+    VALUE_CHECK_PARTY_POSITION = 0xf1,
+    VALUE_GET_GLOBAL_FLAG = 0xf0,
+    VALUE_END_CONDITIONAL = 0xee,
+    VALUE_GET_PARTY_DIRECTION = 0xed,
+    VALUE_GET_WALL_SIDE = 0xe9,
+    VALUE_GET_POINTER_ITEM = 0xe7,
+    VALUE_GET_TRIGGER_FLAG = 0xe0,
+    VALUE_CONTAINS_RACE = 0xdd,
+    VALUE_CONTAINS_CLASS = 0xdc,
+    VALUE_ROLL_DICE = 0xdb,
+    VALUE_IS_PARTY_VISIBLE = 0xda,
+    VALUE_CONTAINS_ALIGNMENT = 0xce,
+    VALUE_GET_LEVEL_FLAG = 0xef,
+
+
+class Class(Enum):
+    Fighter = 0x0,
+    Ranger = 0x1,
+    Paladin = 0x2,
+    Mage = 0x3,
+    Cleric = 0x4,
+    Thief = 0x5,
+    FighterCleric = 0x6,
+    FighterThief = 0x7,
+    FighterMage = 0x8,
+    FighterMageThief = 0x9,
+    ThiefMage = 0xa,
+    ClericThief = 0xb,
+    FighterClericMage = 0xc,
+    RangerCleric = 0xd,
+    ClericMage = 0xe,
+
+
+class Race(Enum):
+    HumanMale = 0x0,
+    HumanFemale = 0x1,
+    ElfMale = 0x2,
+    ElfFemale = 0x3,
+    HalfElfMale = 0x4,
+    HalfElfFemale = 0x5,
+    DwarfMale = 0x6,
+    DwarfFemale = 0x7,
+    GnomeMale = 0x8,
+    GnomeFemale = 0x9,
+    HalflingMale = 0xa,
+    HalflingFemale = 0xb,
+
+
+class Alignment(Enum):
+    LawfullGood = 0,
+    NeutralGood = 1,
+    ChaoticGood = 2,
+    LawfullNeutral = 3,
+    TrueNeutral = 4,
+    ChaoticNeutral = 5,
+    LawfullEvil = 6,
+    NeutralEvil = 7,
+    ChaoticEvil = 8,
+
+
+class DoorInfo:
+    """
+    http://eab.abime.net/showpost.php?p=533880&postcount=374
+    http://eab.abime.net/showpost.php?p=579468&postcount=405
+    """
+    def __init__(self):
+        self.command = None
+        self.idx = None
+        self.type = None
+        self.knob = None
+        self.gfxFile = ""
+        self.doorRectangles = [Rectangle() for i in range(3)]        # rectangles in door?.cps size [3]
+        self.buttonRectangles = [Rectangle() for i in range(2)]    # rectangles in door?.cps size [2]
+        self.buttonPositions = [Point() for i in range(2)]         # x y position where to place door button size [2,2]
+
+    def decode(self):
+        return {
+            "command": self.command,
+            "idx": self.idx,
+            "type": self.type,
+            "knob": self.knob,
+            "gfxFile": self.gfxFile,
+            "doorRectangle": [rect.decode() for rect in self.doorRectangles],
+            "buttons": {
+                "rectangles": [rect.decode() for rect in self.buttonRectangles],
+                "positions":  [point.decode() for point in self.buttonPositions],
+            }
+        }
+
+
+class MonsterType:
+    """
+
+    """
+    def __init__(self):
+        self.index = 0
+        self.unk0 = None
+        self.thac0 = 0
+        self.unk1 = None
+        self.hp_dice = Dice()
+        self.number_of_attacks = 0
+        self.attack_dice = [Dice() for i in range(3)]
+        self.special_attack_flag = 0
+        self.abilities_flags = 0
+        self.unk2 = None
+        self.exp_gain = 0
+        self.size = 0
+        self.attack_sound = 0
+        self.mouve_sound = 0
+        self.unk3 = None
+        self.is_attack2 = 0
+        self.distant_attack = 0
+        self.max_attack_count = 0
+        self.attack_list = [None for i in range(5)]
+        self.turn_undead_value = 0
+        self.unk4 = None
+        self.unk5 = [None for i in range(3)]
+
+    def decode(self):
+        return {
+            "index": self.index,
+            "unknown0": self.unk0,
+            "thac0": self.thac0,
+            "unknown1": self.unk1,
+            "hp": self.hp_dice.decode(),
+            "attacks": {
+                "count": self.number_of_attacks,
+                "dices": [dice.decode() for dice in self.attack_dice],
+                "special_flags": self.special_attack_flag,
+                "abilities_flags": self.abilities_flags,
+                "sound": self.attack_sound,
+                "distant": self.distant_attack,
+            },
+            "unknown2": self.unk2,
+            "exp_gain": self.exp_gain,
+            "size": self.size ,
+            "move_sound": self.mouve_sound,
+            "unknown3": self.unk3,
+            "is_attack2": self.is_attack2,
+            "max_attack_count": self.max_attack_count,
+            "attack_list": [i for i in self.attack_list],
+            "turn_undead": self.turn_undead_value,
+            "unknown4": self.unk4,
+            "unknown5": [i for i in self.unk5],
+        }
+
+
+class MonsterGfx:
+    """
+
+    """
+
+    def __init__(self):
+        self.used = False
+        self.load_prog = None
+        self.unk0 = None
+        self.unk1 = None
+        self.label = ""
+
+    def decode(self):
+        return {
+            "used": self.used,
+            "load_prog": self.load_prog,
+            "unknown0": self.unk0,
+            "unknown1": self.unk1,
+            "label": self.label
+        }
+
+
+class Trigger:
+    """
+
+    """
+
+    def __init__(self, reader=None):
+        """
+
+        :param reader:
+        """
+        self.location = None
+        self.flags = None
+        self.offset = None
+
+        self.decode(reader)
+
+        """
+        flags:
+            A = 0x01,
+            B = 0x02,
+            C = 0x04,
+            OnPartyEnter = 0x08,	# Confirmed
+            D = 0x10,
+            HoleOrPressure = 0x20,
+            F = 0x40,
+            G = 0x80,
+            H = 0x100,
+            I = 0x200,
+            K = 0x400,
+            OnClick = 0x800,
+            M = 0x1000,
+            N = 0x2000,
+            O = 0x4000,
+            P = 0x8000,
+                        // item drop
+                        // item taken
+                        // party enter
+                        // party leave
+        
+        """
+    def decode(self, reader):
+        """
+
+        :param reader:
+        :return:
+        """
+        if not reader:
+            return
+
+        self.location = Location(reader)
+        self.flags = reader.read_ushort()
+        self.offset = reader.read_ushort()
+
+    def run(self, maze, assets):
+        """
+
+        :return:
+        """
+        return {
+            "offset": self.offset,
+            "flags": self.flags,
+        }
+
+    def __str__(self):
+        return "{location}: offset: 0x{offset:04X}, flags: 0x{flags:02X}".format(
+            location=self.location, offset=self.offset, flags=self.flags
+        )
+
+
+class Header:
+    """
+
+    """
+    def __init__(self):
+        self.mazeName = None
+        self.vmpVncName = None
+        self.paletteName = None
+        self.soundName = None
+        self.doors = [DoorInfo() for i in range(2)]
+        self.monsterGfx = [MonsterGfx() for i in range(2)]
+        self.monsterTypes = [] # [MonsterType() for i in range(35)]
+        self.decorations = []
+        self.max_monsters = None
+        self.next_hunk = None
+
+    def decode(self):
+        return {
+            "mazeName": self.mazeName,
+            "vmpVncName": self.vmpVncName,
+            "palette": self.paletteName,
+            "sound": self.soundName,
+            "doors": [door.decode() for door in self.doors],
+            "monsters": {
+                "gfx": [gfx.decode() for gfx in self.monsterGfx],
+                "types": [type.decode() for type in self.monsterTypes],
+            },
+            "decorations": [None for deco in self.decorations],
+            "max_monsters": self.max_monsters,
+            'next_hunk': self.next_hunk,
+        }
+
+
+class Script:
+    """
+
+    """
+    def __init__(self, reader=None):
+        """
+
+        """
+        self.tokens = {}
+
+        self.decompile(reader)
+
+    def decompile(self, reader):
+        """
+
+        :return:
+        """
+        if not reader:
+            return
+
+        start = reader.offset
+        length = reader.read_ushort()
+
+        while reader.offset < start + length:
+
+            # if debug:
+            #     print("[0x{:04X}]: ".format(reader.offset - start), end='')
+            offset = reader.offset - start
+            token = None
+            opcode = reader.read_ubyte()
+            if opcode == 0xff:
+                token = tokens.SetWall(reader)
+            elif opcode == 0xfe:
+                token = tokens.ChangeWall(reader)
+            elif opcode == 0xfd:
+                token = tokens.OpenDoor(reader)
+            elif opcode == 0xfc:
+                token = tokens.CloseDoor(reader)
+            elif opcode == 0xfb:
+                token = tokens.CreateMonster(reader)
+            elif opcode == 0xfa:
+                token = tokens.Teleport(reader)
+            elif opcode == 0xf9:
+                token = tokens.StealSmallItem(reader)
+            elif opcode == 0xf8:
+                token = tokens.Message(reader)
+            elif opcode == 0xf7:
+                token = tokens.SetFlag(reader)
+            elif opcode == 0xf6:
+                token = tokens.Sound(reader)
+            elif opcode == 0xf5:
+                token = tokens.ClearFlag(reader)
+            elif opcode == 0xf4:
+                token = tokens.Heal(reader)
+            elif opcode == 0xf3:
+                token = tokens.Damage(reader)
+            elif opcode == 0xf2:
+                token = tokens.Jump(reader)
+            elif opcode == 0xf1:
+                token = tokens.End(reader)
+            elif opcode == 0xf0:
+                token = tokens.Return(reader)
+            elif opcode == 0xef:
+                token = tokens.Call(reader)
+            elif opcode == 0xee:
+                token = tokens.Conditional(reader)
+            elif opcode == 0xed:
+                token = tokens.ConsumeItem(reader)
+            elif opcode == 0xec:
+                token = tokens.ChangeLevel(reader)
+            elif opcode == 0xeb:
+                token = tokens.GiveXP(reader)
+            elif opcode == 0xea:
+                token = tokens.NewItem(reader)
+            elif opcode == 0xe9:
+                token = tokens.Launcher(reader)
+            elif opcode == 0xe8:
+                token = tokens.Turn(reader)
+            elif opcode == 0xe7:
+                token = tokens.IdentifyAllItems(reader)
+            elif opcode == 0xe6:
+                token = tokens.Sequence(reader)
+            elif opcode == 0xe5:
+                token = tokens.Wait(reader)
+            elif opcode == 0xe4:
+                token = tokens.UpdateScreen(reader)
+            elif opcode == 0xe3:
+                token = tokens.Dialog(reader)
+            elif opcode == 0xe2:
+                token = tokens.SpecialEvent(reader)
+
+            if token:
+                self.tokens[offset] = token
+            else:
+                print("###########[ERROR] unknown opcode: 0x{opcode:02X}".format(opcode=opcode))
+
+    def run(self, maze, assets):
+        for id, offset in enumerate(self.tokens):
+            msg = self.tokens[offset].run(maze, assets)
+            print('[0x{offset:04X}] {token}'.format(offset=offset, token=msg))
+
+
+class Maze:
+    """
+
+    """
+    def __init__(self, name):
+
+        self.name = name
+        self.timers = []
+        self.monsters = []
+        self.headers = [Header() for i in range(2)]
+        self.hunks = [0, 0]
+        self.triggers = []
+        self.messages = []
+        self.script = None
+
+        self.width = 0
+        self.height = 0
+        self.walls = []
+
+    def process(self, filename, assets):
+        """
+
+        :param filename:
+        :return:
+        """
+
+        # http://grimwiki.net/wiki/EobConverter
+        # LEVEL*.MAZ files are stored in PAK files, so you need to extract PAK to extract them first. MAZ files
+        # contain dungeon layout (walls, doors, buttons etc.). It does not contain information about items.
+        #
+        # First 6 bytes constitute a header:
+        #
+        #     uint16_t width - specifies dungeon width (EOB1 levels always use 32)
+        #     uint16_t height - specifies dungeon height (EOB1 levels always use 32)
+        #     uint16_t unknown - EOB1 levels seem to have value 0x0004 here. One interpretation is that it may be a
+        #                        number of bytes for each grid.
+        #
+        # Header is followed by width x height grid definitions. Each grid takes 4 bytes. For all EOB1 MAZ levels,
+        # that gives 32x32x4 = 4096 bytes. Together with 6 bytes (header), this results in each file having length
+        #  of 4102 bytes.
+        #
+        # Each grid is described by 4 octets. Each character specifies how a given grid looks from W, S, E and N,
+        # respectively. It is possible to define inconsistent grids (e.g. look like doors when looked up front, but
+        # look like a pressure plate when seen from sides).
+        #
+        #     0x00 - empty corridor
+        #     0x01 - wall (pattern 1)
+        #     0x02 - wall (pattern 2)
+        #     0x03 - door without a button (closed) opening
+        #     0x04 - door opening 1
+        #     0x05 - door opening1
+        #     0x07 - door opened
+        #     0x08 - door with a button (closed)
+        #     0x09 - door opening2
+        #     0x0a - door opening2
+        #     0x0b - door opening2
+        #     0x0c - a ladder leading down
+        #     0x0d - door with a button (open)
+        #     0x11 - door opened
+        #     0x12 - door closed
+        #     0x13 - door opening4
+        #     0x14 - door opening4
+        #     0x15 - door opening4
+        #     0x16 - door opened
+        #     0x17 - up stair/ladder
+        #     0x18 - fake ladder leading down (used in inaccessible part of level 1, probably by EOB developers for testing)
+        #     0x19 - blocker
+        #     0x1a - hole in the ceiling (from upper level)
+        #     0x1b - pressure plate
+        #     0x1c - pressure plate
+        #     0x1d - normal alcove
+        #     0x1f - pressure plate
+        #     0x20 - switch
+        #     0x23 - dalle(inter)
+        #     0x24 - dalle(inter)
+        #     0x25 - hole (ceilar)
+        #     0x26 - hole (floor)
+        #     0x27 - hidden button (large pushable brick)
+        #     0x2a - hidden switch
+        #     0x2b - drainage at the floor level (decoration)
+        #     0x2c - "rat hole" - drainage at the floor level with eyes (decoration) or teleport
+        #     0x33 - door to force
+        #     0x36 - stone portal
+        #     0x37 - lever
+        #     0x3c - normal button, small brick sized
+        #     0x3e - rat hole
+        #     0x3f - sewer pipe (in the middle)
+        #     0x41 - rune 'entrance'
+        #     0x45 - cave-in or stone portal
+
+
+        print("==============> Decode maze '{filename}'".format(filename=filename))
+
+        # Read wall decorations
+        with BinaryReader(filename + '.MAZ') as reader:
+            self.width = reader.read_ushort()
+            self.height = reader.read_ushort()
+            faces = reader.read_ushort()
+
+            self.walls = [[None for y in range(self.height)] for x in range(self.width)]
+
+            for y in range(self.height):
+                for x in range(self.width):
+                    n = reader.read_ubyte()
+                    s = reader.read_ubyte()
+                    w = reader.read_ubyte()
+                    e = reader.read_ubyte()
+
+                    self.walls[x][y] = {
+                        'n': n,
+                        's': s,
+                        'w': w,
+                        'e': e,
+                    }
+
+        with BinaryReader(filename + '.INF') as reader:
+
+            # hunk 1
+            self.hunks[0] = reader.read_ushort()
+
+            # region Headers
+            for header in self.headers:
+
+                if reader.offset < self.hunks[0]:
+                    header.next_hunk = reader.read_ushort()
+                    b = reader.read_ubyte()
+                    if b == 0xEC:
+                        header.mazeName = reader.read_string(13)
+                        header.vmpVncName = reader.read_string(13)
+
+                    b = reader.read_ubyte()
+                    if b != 0xFF:
+                        header.paletteName = reader.read_string(13)
+
+                    header.soundName = reader.read_string(13)
+
+                    # region Door name & Positions + offset
+                    for door in header.doors:
+
+                        b = reader.read_ubyte()
+                        if b in (0xEC, 0xEA):
+                            door.gfxFile = reader.read_string(13)
+                            door.idx = reader.read_ubyte()
+                            door.type = reader.read_ubyte()
+                            door.knob = reader.read_ubyte()
+
+                            for rect in door.doorRectangles:
+                                rect.x = reader.read_ushort()
+                                rect.y = reader.read_ushort()
+                                rect.width = reader.read_ushort()
+                                rect.height = reader.read_ushort()
+
+                            for rect in door.buttonRectangles:
+                                rect.x = reader.read_ushort()
+                                rect.y = reader.read_ushort()
+                                rect.width = reader.read_ushort()
+                                rect.height = reader.read_ushort()
+
+                            for pt in door.buttonPositions:
+                                pt.x = reader.read_ushort()
+                                pt.y = reader.read_ushort()
+                    # endregion
+
+                    # region Monsters graphics informations
+                    header.max_monsters = reader.read_ushort()
+                    for i in range(2):
+                        b = reader.read_ubyte()
+                        if b == 0xEC:
+                            gfx = MonsterGfx()
+                            gfx.load_prog = reader.read_ubyte()
+                            gfx.unk0 = reader.read_ubyte()
+                            gfx.label = reader.read_string(13)
+                            gfx.unk1 = reader.read_ubyte()
+
+                            header.monsterGfx[i] = gfx
+                    # endregion
+
+                    # region Monster definitions
+                    while True:
+                        b = reader.read_ubyte()
+                        if b == 0xFF:
+                            break
+
+                        type = MonsterType()
+                        type.index = b
+                        type.unk0 = reader.read_ubyte()
+                        type.thac0 = reader.read_ubyte()
+                        type.unk1 = reader.read_ubyte()
+
+                        type.hp_dice.process(reader)
+
+                        type.number_of_attacks = reader.read_ubyte()
+                        for dice in type.attack_dice:
+                            dice.process(reader)
+
+                        type.special_attack_flag = reader.read_ushort()
+                        type.abilities_flags = reader.read_ushort()
+                        type.unk2 = reader.read_ushort()
+                        type.exp_gain = reader.read_ushort()
+                        type.size = reader.read_ubyte()
+                        type.attack_sound = reader.read_ubyte()
+                        type.move_sound = reader.read_ubyte()
+                        type.unk3 = reader.read_ubyte()
+
+                        b = reader.read_ubyte()
+                        if b != 0xFF:
+                            type.is_attack2 = True
+                            type.distant_attack = reader.read_ubyte()
+                            type.max_attack_count = reader.read_ubyte()
+                            for i in range(type.max_attack_count):
+                                type.attack_list[i] = reader.read_ubyte()
+                                reader.read_ubyte()
+
+                        type.turn_undead_value = reader.read_ubyte()
+                        type.unk4 = reader.read_ubyte()
+                        type.unk5[0] = reader.read_ubyte()
+                        type.unk5[1] = reader.read_ubyte()
+                        type.unk5[2] = reader.read_ubyte()
+
+                        header.monsterTypes.append(type)
+
+                    # endregion
+
+                    # region Wall decorations
+                    b = reader.read_ubyte()
+                    if b != 0xFF:
+                        decorateblocks = reader.read_ushort()
+                        for i in range(decorateblocks):
+                            b = reader.read_ubyte()
+                            deco = DecorationInfo()
+                            if b == 0xEC:
+                                deco.files = DecorationFilename()
+                                deco.files.gfx = reader.read_string(13)
+                                deco.files.dec = reader.read_string(13)
+                            elif b == 0xFB:
+                                deco.wallMapping = WallMapping()
+                                deco.wallMapping.index = reader.read_byte()
+                                deco.wallMapping.type = reader.read_ubyte()
+                                deco.wallMapping.decorationId = reader.read_byte()
+                                deco.wallMapping.eventMask = reader.read_ubyte()
+                                deco.wallMapping.flags = reader.read_ubyte()
+                            else:
+                                pass
+
+                            header.decorations.append(deco)
+                    # endregion
+
+                    # Padding
+                    while reader.read_uint() != 0xFFFFFFFF:
+                        pass
+            # endregion
+
+            self.hunks[1] = reader.read_ushort()
+
+            # region Monsters
+            b = reader.read_ubyte()
+            if b != 0xFF:
+                # Timers
+                while reader.read_ubyte() != 0xFF:
+                    self.timers.append(reader.read_ubyte())
+
+                # Descriptions
+                for i in range(30):
+                    monster = Monster()
+                    monster.index = reader.read_ubyte()
+                    monster.timer_id = reader.read_ubyte()
+                    monster.location = Location(reader)
+                    monster.sub_position = reader.read_ubyte()
+                    monster.direction = reader.read_ubyte()
+                    monster.type = reader.read_ubyte()
+                    monster.picture_index = reader.read_ubyte()
+                    monster.phase = reader.read_ubyte()
+                    monster.pause = reader.read_ubyte()
+                    monster.weapon = reader.read_ushort()
+                    monster.pocket_item = reader.read_ushort()
+
+                    self.monsters.append(monster)
+
+            # endregion
+
+            # Scripts
+            self.script = Script(reader)
+
+            # region Messages
+            while reader.offset < self.hunks[1]:
+                self.messages.append(reader.search_string())
+
+            # endregion
+
+            # region Triggers
+            trigger_count = reader.read_ushort()
+            for i in range(trigger_count):
+                trigger = Trigger(reader)
+                self.triggers.append(trigger)
+
+            # endregion
+            i = 1
+
+    def decode(self, assets):
+        return {
+            # "name": self.name,
+            # "width": self.width,
+            # "height": self.height,
+            # "timers": [timer for timer in self.timers],
+            # "headers": [header.decode() for header in self.headers],
+            # "hunks": [hunk for hunk in self.hunks],
+            # "triggers": {trigger.location.coordinates(): trigger.run(self, assets) for trigger in self.triggers},
+            # "messages": {k: v for k, v in enumerate(self.messages)},
+            "scripts": self.script.run(self, assets),
+            "walls": self._decode_walls(),
+            # "monsters": [],
+        }
+
+    def _decode_walls(self):
+
+        blocks = [['#' for y in range(self.height)] for x in range(self.width)]
+
+        for y in range(self.height):
+            for x in range(self.width):
+                block = self.walls[y][x]
+
+                if block['n'] == 0 and block['e'] == 0 and block['s'] == 0 and block['w'] == 0:
+                    blocks[y][x] = " "
+
+                # if block['n'] in (1, 2):
+                #     blocks[y][x] = "#"
+                #
+                # if block['s'] in (1, 2) and y < self.height -1:
+                #     blocks[y][x] = "#"
+                #
+                # if block['w'] in (1, 2):
+                #     blocks[y][x] = "#"
+                #
+                # if block['e'] in (1, 2) and x < self.width -1:
+                #     blocks[y][x] = "#"
+
+                # if block['n'] == 0 and block['e'] == 0 and block['s'] == 0 and block['w'] == 0:
+                #     wall = ' '
+                # else:
+                #     wall = '#'
+                #
+                # blocks[y][x] = wall
+
+        return [''.join(row) for row in blocks]
+
+
+class Champion(object):
+    pass
+
+
+class Savegame:
+
+    def __init__(self, filename):
+        self._filename = filename
+        self._champions = []
+
+        with BinaryReader(filename) as reader:
+            self.name = reader.read_string(20)
+
+            # Champions
+            for i in range(6):
+                champion = Champion()
+                champion.id = reader.read_ubyte()
+                champion.active = reader.read_ubyte()
+                champion.name = reader.read_string(11)
+                champion.strength = reader.read_ubyte(2)
+                champion.strength_extra = reader.read_ubyte(2)
+
+                champion.intelligence = reader.read_ubyte(2)
+                champion.wisdom = reader.read_ubyte(2)
+                champion.dexterity = reader.read_ubyte(2)
+                champion.constitution = reader.read_ubyte(2)
+                champion.charisma = reader.read_ubyte(2)
+                champion.hitpoint = reader.read_ushort(2)
+                champion.armorclass = reader.read_byte(1)
+                champion.pad_01 = reader.read_ubyte()
+
+                champion.race = reader.read_ubyte()
+                champion.class_ = reader.read_ubyte()
+                champion.alignment = reader.read_ubyte()
+                champion.portrait = reader.read_ubyte()
+                champion.food = reader.read_ubyte()
+                champion.level = reader.read_ubyte(3)
+
+                champion.experience = reader.read_uint(3)
+
+                champion.pad_02 = reader.read_ubyte(5)
+
+                champion.spells_available = reader.read_ubyte(159)
+                champion.spells_learned = reader.read_byte(4)
+
+                champion.hands = reader.read_ushort(2)
+
+                champion.backpack = reader.read_ushort(14)
+                champion.quiver = reader.read_ubyte()
+                champion.armor = reader.read_byte()
+                champion.bracers = reader.read_ushort()
+                champion.helmet = reader.read_ushort()
+                champion.medaillon = reader.read_ushort()
+                champion.boots = reader.read_ushort()
+                champion.belt = reader.read_ushort(3)
+                champion.ring = reader.read_ushort(2)
+
+                champion.pad_02 = reader.read_ubyte(72)
+                self._champions.append(champion)
+                i = 1
+
+            # Game states
+            self.level = reader.read_ushort()
+            self.sub_level = reader.read_ushort()
+            self.position = reader.read_ushort()
+            self.dir = reader.read_ushort()
+            self.sub_position = reader.read_ushort()
+            self.item_in_hand = reader.read_ushort()
+            self.level_bits = reader.read_uint()
+            self.spells_flags = reader.read_uint()
+            self.pad_01 = reader.read_ubyte()
+            self.monster_near = reader.read_ubyte()
+            self.level_flags = reader.read_ubyte(64)
+            self.world_flags = reader.read_uint()
+
+            i = 1
+
+
+def decode_itemtypes():
+    """
+
+    types:
+     47 => rings
+     31 => eatable/food
+    """
+    item_types = []
+    with BinaryReader('data/ITEMTYPE.DAT') as reader:
+        count = reader.read_ushort()
+        for i in range(count):
+            type = {
+                # At which position in inventory it is allowed to be put. See InventoryUsage
+                'slots': str(ItemSlotFlags(reader.read_ushort())),
+                'flags': str(ItemFlags(reader.read_ushort())),
+                'armor_class': reader.read_byte(),        # Adds to armor class
+                'allowed_classes': str(ProfessionFlags(reader.read_ubyte())),    # Allowed for this profession. See ClassUsage
+                'required_hand': str(HandFlags(reader.read_ubyte())),   # Allowed for this hand
+                'damage_vs_small': str(Dice(reader)),
+                'damage_vs_big': str(Dice(reader)),
+                # 'damage_incs': reader.read_ubyte(),
+                'unknown': reader.read_ubyte(),
+                'extra': reader.read_ushort(),
+            }
+
+            item_types.append(type)
+
+    return item_types
+    # print("Item types :", json.dumps(item_types, indent=2, sort_keys=True))
+
+
+def decode_items():
+    items = []          # ITEM.DAT
+    with BinaryReader('data/ITEM.DAT') as reader:
+        count = reader.read_ushort()
+        for i in range(count):
+            item = {
+                'unidentified_name': reader.read_ubyte(),
+                'identified_name': reader.read_ubyte(),
+                'flags': reader.read_ubyte(),
+                'picture': reader.read_ubyte(),
+                'type': reader.read_ubyte(),           # See types below
+
+                # Where the item lies at position
+                # In Maze:
+                #      0..3-> Bottom
+                #      4..7-> Wall (N,E,S,W)
+                # For EotB I: 0..3-> Floor NW,NE,SW,SE
+                #                8-> Compartment
+                # If in inventory:
+                #      0..26-> Position in Inventory
+                'sub_position': reader.read_ubyte(),
+
+                # Position in maze x + y * 32 | 0 => Consumed
+                'coordinate': reader.read_ushort(),
+                'next': reader.read_ushort(),
+                'previous': reader.read_ushort(),
+
+                # Level, where the item lies, 0 <= no level
+                'level': reader.read_ubyte(),
+
+                # The value of item, -1 if consumed
+                'value': reader.read_byte(),
+            }
+            pos = divmod(item['coordinate'], 32)
+            item['coordinate'] = {'x': pos[1], 'y': pos[0]}
+            items.append(item)
+
+        count = reader.read_ushort()
+        for i in range(count):
+            name = reader.read_string(35)
+            assets['item_names'].append(name)
+
+        for item in items:
+            item['unidentified_name'] = assets['item_names'][item['unidentified_name']]
+            item['identified_name'] = assets['item_names'][item['identified_name']]
+
+    return items
+
+
+def decode_levels(assets):
+    # .INF
+    files = [
+        # 'LEVEL1',
+        # 'LEVEL2',
+        'LEVEL3',
+        # 'LEVEL4',
+        # 'LEVEL5',
+        # 'LEVEL6',
+        # 'LEVEL7',
+        # 'LEVEL8',
+        # 'LEVEL9',
+        # 'LEVEL10',
+        # 'LEVEL11',
+        # 'LEVEL12',
+        # 'LEVEL13',
+        # 'LEVEL14',
+        # 'LEVEL15',
+    ]
+    levels = {}
+
+    for file in files:
+        level = Maze(file)
+        level.process('data/{file}'.format(file=file), assets)
+        levels[file] = level.decode(assets)
+
+    return levels
+
+
+def decode_dec():
+    # .DEC
+
+    files = ['AZURE.DEC', 'BROWN.DEC', 'CRIMSON.DEC', 'FOREST.DEC', 'MEZZ.DEC', 'SILVER.DEC']
+    decorations = {}
+
+    for file in files:
+        decorations[file] = {
+            'decorations': [],
+            'rectangles': [],
+        }
+        with BinaryReader('data/{file}'.format(file=file)) as reader:
+            count = reader.read_ushort()
+
+            for i in range(count):
+                deco = {
+                    'shapes':  [-1 if value == 255 else value for value in reader.read_ubyte(10)],
+                    'next':    reader.read_byte(),
+                    'flags':   reader.read_byte(),          # horizontal/vertical flip ?
+                    'shape_x': reader.read_short(10),
+                    'shape_y': reader.read_short(10),
+                }
+                decorations[file]['decorations'].append(deco)
+
+            count = reader.read_ushort()
+            for i in range(count):
+                rect = list(reader.read_ushort(4))
+                rect[0] *= 8
+                rect[2] *= 8
+                decorations[file]['rectangles'].append(rect)
+
+    return decorations
+
+
+def decode_texts():
+    file = 'data/TEXT.DAT'
+    offsets = []
+    msg = []
+    with BinaryReader(file) as reader:
+        while True:
+            offset = reader.read_ushort()
+            offsets.append(offset)
+            if reader.offset >= offsets[0]:
+                break
+
+        for id, offset in enumerate(offsets):
+
+            if id == len(offsets) - 1:
+                length = os.path.getsize(file) - offsets[id]
+            else:
+                length = offsets[id + 1] - offsets[id]
+
+            msg.append(reader.read_string(length))
+
+    return msg
+
+
+def dump(name, data):
+    path = './build'
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    with open('{path}/{name}'.format(path=path, name=name), 'w') as handle:
+        json.dump(data, handle, indent=True, sort_keys=True)
+
+
+def generate_decorations():
+    path = "build/"
+    for name in assets['decorations']:
+        decoration = assets['decorations'][name]
+        img = Image.new('RGB', (320, 200))
+
+        d = ImageDraw.Draw(img)
+        d.rectangle([0, 0, 640, 480], 'white')
+        for rect in decoration['rectangles']:
+            x = rect[0]
+            y = rect[1]
+            right = x + rect[2]
+            bottom = y + rect[3]
+            d.rectangle([x, y, right, bottom], 'blue', 'red')
+
+        img.save('{path}{name}.png'.format(path=path, name=name))
+
+
+def gen_crimson():
+    deco = assets['decorations']['CRIMSON.DEC']
+    cps = Image.open('data/CRIMSON.PNG')
+
+    img = Image.new('RGB', (320, 200))
+
+
+    d = ImageDraw.Draw(img)
+    d.rectangle([0, 0, 640, 480], 'white')
+
+    for rect in deco['rectangles']:
+        x = rect[0]
+        y = rect[1]
+        right = x + rect[2]
+        bottom = y + rect[3]
+
+        region = cps.crop([x, y, right, bottom])
+        img.paste(region,box=[x, y])
+
+        img.save('build/CRIMSON_decoded.PNG')
+
+        i = 1
+
+assets = {
+    "items": [],
+    "item_types": [],
+    "item_names": [],
+    'texts': [],
+    'level_items': [],
+    'levels': [],
+    'decorations': []
+}
+
+if __name__ == '__main__':
+
+    # TEXT.DAT
+    assets['texts'] = decode_texts()
+    dump('text.json', assets['texts'])
+
+    # ITEMTYPE.DAT
+    assets['item_types'] = decode_itemtypes()
+    dump('item_types.json', assets['item_types'])
+
+    # ITEM.DAT
+    assets['items'] = decode_items()
+    dump('items.json', assets['items'])
+
+    # Rebuild items in levels
+    level_items = [{
+        'flags': str(ItemFlags(item['flags'])),
+        'type': assets['item_types'][item['type']],
+        'picture': item['picture'],
+        'value': item['value'],
+        'coordinate': {
+            'level': item['level'],
+            'x': item['coordinate']['x'],
+            'y': item['coordinate']['y'],
+        }
+    } for item in assets['items']]
+    dump('level_items.json', level_items)
+
+    #
+    assets['levels'] = decode_levels(assets)
+    dump('levels.json', assets['levels'])
+
+    assets['decorations'] = decode_dec()
+    dump('decorations.json', assets['decorations'])
+
+    # generate_decorations()
+    gen_crimson()
+
+    exit()
+
+    # Savegame
+    savegame = Savegame('extractor/data/EOBDATA2.SAV')
+
+
+    print(json.dumps({
+        'items': {
+            'types': assets['item_types'],
+            'names': assets['item_names'],
+            'definitions': assets.items,
+        },
+        'decorations': {
+            'definitions': assets['decorations'],
+            'rectangles': dec_rectangles,
+        },
+    }, indent=2, sort_keys=False))
+
