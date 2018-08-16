@@ -1367,16 +1367,17 @@ class Savegame:
 
                 champion.pad_02 = reader.read_ushort(1)
 
-                champion.hand_left = reader.read_ushort()
-                champion.hand_right = reader.read_ushort()
-                champion.backpack = reader.read_ushort(14)
-                champion.armor = reader.read_ushort()
-                champion.bracers = reader.read_ushort(2)
+                champion.hand_left = reader.read_ushort() #
+                champion.hand_right = reader.read_ushort() #
+                champion.backpack = reader.read_ushort(14) #
+                champion.quiver = reader.read_ushort() #
+                champion.armor = reader.read_ushort() #
+                champion.wrist = reader.read_ushort()
                 champion.helmet = reader.read_ushort()
-                champion.medaillon = reader.read_ushort()
+                champion.necklace = reader.read_ushort()
                 champion.boots = reader.read_ushort()
                 champion.belt = reader.read_ushort(3)
-                champion.ring = reader.read_ushort(2)
+                champion.rings = reader.read_ushort(2)
 
                 champion.timers = reader.read_ushort(10)
                 champion.events = reader.read_ushort(10)
@@ -1433,6 +1434,7 @@ class Savegame:
             # self.level_flags = reader.read_ubyte(64)
             # self.world_flags = reader.read_uint()
 
+            c = self.champions[3]
             i = 1
 
 
