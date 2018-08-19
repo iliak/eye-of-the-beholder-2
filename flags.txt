@@ -8,7 +8,11 @@ Items' flags :
 0x40 : Is identified or not
 0x80 :
 
-
+Global flags:
+0x01 :
+0x02 : Level 2
+0x03 : 
+0x04 : Level 2 trigger 47: NPC #1 : Calandra
 
 Monster's flags :
 0x01 :

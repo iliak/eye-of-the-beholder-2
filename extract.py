@@ -8,7 +8,6 @@ from PIL import Image, ImageDraw
 import tokens
 from enum import Enum, IntFlag
 from location import Location
-from monster import Monster
 
 # TODO: Not sure about this one...
 directions = ['north', 'east', 'south', 'west']
@@ -47,7 +46,6 @@ races = {
     0x0A: 'halfling male',
     0x0B: 'halfling female',
 }
-
 
 alignments = {
     0x00: "Lawful Good",
@@ -371,6 +369,59 @@ class BinaryReader:
         self.handle.seek(offset)
 
 
+class Monster:
+    """
+
+    """
+
+    def __init__(self, reader=None):
+        """
+
+        """
+        self.index = None
+        self.timer_id = None
+        self.location = None
+        self.sub_position = None
+        self.direction = None
+        self.type = None
+        self.picture_index = None
+        self.phase = None
+        self.pause = None
+        self.weapon = None
+        self.pocket_item = None
+
+        self.decode(reader)
+
+    def decode(self, reader):
+        if not reader:
+            return
+
+        self.index = reader.read_ubyte()
+        self.timer_id = reader.read_ubyte()
+        self.location = Location(reader)
+        self.sub_position = reader.read_ubyte()
+        self.direction = reader.read_ubyte()
+        self.type = reader.read_ubyte()
+        self.picture_index = reader.read_ubyte()
+        self.phase = reader.read_ubyte()
+        self.pause = reader.read_ubyte()
+        self.pocket_item = reader.read_ushort()
+        self.weapon = reader.read_ushort()
+
+    def __str__(self):
+        """
+
+        :return:
+        """
+
+        return "ID {index} @ {location}|{subposition} [direction: {direction}, Timer:{timer}, type:{type}, " \
+               "picture:{picture}, phase:{phase}, pause:{pause}, weapon:{weapon}, pocket:{pocket}]".format(
+            index=self.index, location=self.location, subposition=self.sub_position, direction=directions[self.direction],
+            timer=self.timer_id, type=self.type, picture=self.picture_index, phase=self.phase, pause=self.pause,
+            weapon=self.weapon, pocket=self.pocket_item
+        )
+
+
 class Dice:
     """
 
@@ -532,10 +583,11 @@ class DecorationInfo:
         self.wallMapping = None
 
     def __str__(self):
+        if self.files:
+            return "File '{file}'".format(file=self.files)
 
-        return "File '{file}' with mapping '{mapping}'".format(
-            file=self.files, mapping=self.wallMapping
-        )
+        else:
+            return "mapping '{mapping}'".format(mapping=self.wallMapping)
 
 
 class DecorationFilename:
@@ -545,6 +597,9 @@ class DecorationFilename:
     def __init__(self):
         self.gfx = ""
         self.dec = ""
+
+    def __str__(self):
+        return 'gfx: {gfx}.cps - dec:{dec}'.format(gfx=self.gfx, dec=self.dec)
 
 
 class ScriptTokens(Enum):
@@ -1052,7 +1107,6 @@ class Maze:
         #     0x41 - rune 'entrance'
         #     0x45 - cave-in or stone portal
 
-
         print("==============> Decode maze '{filename}'".format(filename=filename))
 
         # Read wall decorations
@@ -1063,6 +1117,8 @@ class Maze:
 
             self.walls = [[None for y in range(self.height)] for x in range(self.width)]
 
+            self.walls_set = set()
+
             for y in range(self.height):
                 for x in range(self.width):
                     n = reader.read_ubyte()
@@ -1070,6 +1126,10 @@ class Maze:
                     w = reader.read_ubyte()
                     e = reader.read_ubyte()
 
+                    self.walls_set.add(n)
+                    self.walls_set.add(s)
+                    self.walls_set.add(w)
+                    self.walls_set.add(e)
                     self.walls[x][y] = {
                         'n': n,
                         's': s,
@@ -1198,7 +1258,7 @@ class Maze:
                                 deco.files.dec = reader.read_string(13)
                             elif b == 0xFB:
                                 deco.wallMapping = WallMapping()
-                                deco.wallMapping.index = reader.read_byte()
+                                deco.wallMapping.shapeId = reader.read_byte()
                                 deco.wallMapping.type = reader.read_ubyte()
                                 deco.wallMapping.decorationId = reader.read_byte()
                                 deco.wallMapping.eventMask = reader.read_ubyte()
@@ -1226,7 +1286,7 @@ class Maze:
                 # Descriptions
                 for i in range(30):
                     monster = Monster()
-                    monster.index = reader.read_ubyte()
+                    monster.index = reader.read_byte()
                     monster.timer_id = reader.read_ubyte()
                     monster.location = Location(reader)
                     monster.sub_position = reader.read_ubyte()
@@ -1262,17 +1322,17 @@ class Maze:
 
     def decode(self, assets):
         return {
-            # "name": self.name,
-            # "width": self.width,
-            # "height": self.height,
-            # "timers": [timer for timer in self.timers],
-            # "headers": [header.decode() for header in self.headers],
-            # "hunks": [hunk for hunk in self.hunks],
-            # "triggers": {trigger.location.coordinates(): trigger.run(self, assets) for trigger in self.triggers},
-            # "messages": {k: v for k, v in enumerate(self.messages)},
+            "name": self.name,
+            "width": self.width,
+            "height": self.height,
+            "timers": [timer for timer in self.timers],
+            "headers": [header.decode() for header in self.headers],
+            "hunks": [hunk for hunk in self.hunks],
+            "triggers": {trigger.location.coordinates(): trigger.run(self, assets) for trigger in self.triggers},
+            "messages": {k: v for k, v in enumerate(self.messages)},
             "scripts": self.script.run(self, assets),
-            "walls": self._decode_walls(),
-            # "monsters": [],
+            # "walls": self._decode_walls(),
+            "monsters": [],
         }
 
     def _decode_walls(self):
@@ -1312,9 +1372,8 @@ class Champion(object):
 
     name = None
 
-
     def __str__(self):
-        return self.name
+        return "{name} ({classe})".format(name=self.name, classe=self.class_)
 
 
 class Savegame:
@@ -1367,11 +1426,11 @@ class Savegame:
 
                 champion.pad_02 = reader.read_ushort(1)
 
-                champion.hand_left = reader.read_ushort() #
-                champion.hand_right = reader.read_ushort() #
-                champion.backpack = reader.read_ushort(14) #
-                champion.quiver = reader.read_ushort() #
-                champion.armor = reader.read_ushort() #
+                champion.hand_left = reader.read_ushort()
+                champion.hand_right = reader.read_ushort()
+                champion.backpack = reader.read_ushort(14)
+                champion.quiver = reader.read_ushort()
+                champion.armor = reader.read_ushort()
                 champion.wrists = reader.read_ushort()
                 champion.helmet = reader.read_ushort()
                 champion.necklace = reader.read_ushort()
@@ -1388,8 +1447,8 @@ class Savegame:
                 champion.slot_status = reader.read_byte(5)
 
                 champion.pad_03 = reader.read_ubyte(6)
+
                 self.champions.append(champion)
-                i = 1
 
             # Game states
             assert reader.offset == 2090
@@ -1429,8 +1488,9 @@ class Savegame:
             self.levels = []
             for id in range(17):
                 level = {
-                    "walls": reader.read_byte(1200)
+                    "walls_encoded": reader.read_ubyte(1200)
                 }
+                # level['walls'] = decode_frame_4(level['walls_encoded'], 4096)
 
                 monsters = []
                 for i in range(30):
@@ -1449,8 +1509,8 @@ class Savegame:
                     monster.hp_max = reader.read_short()
                     monster.hp_current = reader.read_short()
                     monster.dest = Location(reader)
-                    monster.pocket_item = reader.read_ushort()
                     monster.weapon = reader.read_ushort()
+                    monster.pocket_item = reader.read_ushort()
                     monster.flags = reader.read_ubyte()
                     monster.idle_anim = reader.read_ubyte()
                     monster.remote_weapon = reader.read_byte()
@@ -1477,7 +1537,7 @@ class Savegame:
 
             # Game options
             assert reader.offset == 46792
-            reader.seek(46792)
+            # reader.seek(46792)
             self.options = {
                 "mouse_switch": reader.read_byte(),
                 "with_sounds": reader.read_byte(),
@@ -1487,7 +1547,7 @@ class Savegame:
             # Special hand-spells which are special itemtypes [id from 51 to 57]
             # Offset: 46795
             assert reader.offset == 46795
-            reader.seek(46795)
+            # reader.seek(46795)
             for i in range(51, 57):
                 type = {
                     'slots':           str(ItemSlotFlags(reader.read_ushort())),
@@ -1504,6 +1564,34 @@ class Savegame:
 
             c = self.champions[3]
             i = 1
+
+
+def decode_frame_4(data, size):
+    dst = [None] * size
+    offset_src = 0
+    offset_dst = 0
+
+    while True:
+        count = size - offset_dst
+        if count == 0:
+            break
+
+        code = data[offset_src]
+        offset_src += 1
+        if (code & 0x80) != 0x80:
+            length = min(count, (code >> 4) + 3)
+            offs = ((code & 0xF) << 8)
+
+        elif (code & 0x40) == 0x40:
+            i = 2
+        elif code != 0x80:
+            length = min(count, code & 0x3F)
+            for i in range(length):
+                dst[offset_src + i] = data[offset_dst + i]
+            offset_src += length
+            offset_dst += length
+
+
 
 
 def decode_itemtypes():
@@ -1589,10 +1677,10 @@ def decode_items():
 def decode_levels(assets):
     # .INF
     files = [
-        # 'LEVEL1',
-        # 'LEVEL2',
+        'LEVEL1',
+        'LEVEL2',
         'LEVEL3',
-        # 'LEVEL4',
+        'LEVEL4',
         # 'LEVEL5',
         # 'LEVEL6',
         # 'LEVEL7',
@@ -1610,7 +1698,8 @@ def decode_levels(assets):
     for file in files:
         level = Maze(file)
         level.process('data/{file}'.format(file=file), assets)
-        levels[file] = level.decode(assets)
+        levels[file] = level
+        # levels[file] = level.decode(assets)
 
     return levels
 
@@ -1624,7 +1713,7 @@ def decode_dec():
     for file in files:
         decorations[file] = {
             'decorations': [],
-            'rectangles': [],
+            'shapes': [],
         }
         with BinaryReader('data/{file}'.format(file=file)) as reader:
             count = reader.read_ushort()
@@ -1644,9 +1733,28 @@ def decode_dec():
                 rect = list(reader.read_ushort(4))
                 rect[0] *= 8
                 rect[2] *= 8
-                decorations[file]['rectangles'].append(rect)
+                decorations[file]['shapes'].append(rect)
 
     return decorations
+
+
+def draw_dec():
+    files = ['AZURE', 'BROWN', 'CRIMSON', 'FOREST', 'MEZZ', 'SILVER']
+
+    for file in files:
+        dec = assets['dec'][file + '.DEC']
+        i = 1
+
+
+
+
+def draw_vmp():
+    files = ['CRIMSON', 'DUNG', 'FOREST', 'MEZZ', 'SILVER']
+
+    for file in files:
+        vcn = assets['vcn'][file + '.VCN']
+        vmp = assets['vmp'][file + '.VMP']
+        i = 1
 
 
 def decode_texts():
@@ -1670,6 +1778,167 @@ def decode_texts():
             msg.append(reader.read_string(length))
 
     return msg
+
+
+def decode_vmp():
+    files = ['CRIMSON.VMP', 'DUNG.VMP', 'FOREST.VMP', 'MEZZ.VMP', 'SILVER.VMP']
+    vmp = {}
+
+    for file in files:
+
+        with BinaryReader('data/{file}'.format(file=file)) as reader:
+            count = reader.read_ushort()
+            codes = reader.read_ushort(count)
+
+        vmp[file] = {
+            'count': count,
+            'codes': codes,
+        }
+
+    return vmp
+
+
+def decode_pal():
+
+    files = [ 'AZURE.PAL', 'CRIMSON.PAL', 'DUNG.PAL', 'FINALE_0.PAL', 'FINALE_1.PAL', 'FINALE_2.PAL', 'FINALE_3.PAL',
+              'FINALE_4.PAL', 'FINALE_5.PAL', 'FINALE_6.PAL', 'FINALE_7.PAL', 'FOREST.PAL', 'MEZZ.PAL', 'PALETTE0.PAL',
+              'PALETTE1.PAL', 'PALETTE2.PAL', 'PALETTE3.PAL', 'PALETTE4.PAL', 'SILVER.PAL' ]
+    pal = {}
+
+    for file in files:
+        colors = []
+
+        with BinaryReader('data/{file}'.format(file=file)) as reader:
+            for i in range(256):
+                r = reader.read_byte()
+                g = reader.read_byte()
+                b = reader.read_byte()
+
+                colors.append({
+                    "r": r,
+                    "g": g,
+                    "b": b,
+                })
+
+                i = 1
+
+        pal[file] = colors
+
+    return pal
+
+
+def decode_vcn():
+    files = ['CRIMSON.VCN', 'DUNG.VCN', 'FOREST.VCN', 'MEZZ.VCN', 'SILVER.VCN']
+    vcn = {}
+
+    for file in files:
+        vcn[file] = {}
+
+        with BinaryReader('data/{file}'.format(file=file)) as reader:
+            data = decode_format80(reader)
+
+            with open("data/{file}.uncps".format(file=file), "wb") as handle:
+                s = struct.pack('{count}B'.format(count=len(data)), *data)
+                handle.write(s)
+
+            # continue
+        with BinaryReader('data/{file}.uncps'.format(file=file)) as reader:
+
+            vcn[file]['count'] = reader.read_ushort()
+            vcn[file]['palette_backdrop'] = reader.read_ubyte(16)
+            vcn[file]['palette_wall'] = reader.read_ubyte(16)
+            shapes = []
+            for i in range(vcn[file]['count']):
+                raw = reader.read_byte(32)
+                shapes.append(raw)
+            vcn[file]['shapes'] = shapes
+            i = 1
+
+    return vcn
+
+
+def decode_format80(reader):
+    size = reader.read_ushort()
+    type = reader.read_ushort()
+    uncompressed = reader.read_uint()
+    palette = reader.read_ushort()
+
+    if type != 0x4:
+        raise TypeError
+
+    data = [None] * uncompressed
+    dst_offset = 0
+    while True:
+        code = reader.read_ubyte()
+
+        # end code
+        if code == 0x80:
+            return data
+
+        # 0b10######
+        elif code & 0xC0 == 0x80:
+            count = code & 0x3f
+            for i in range(count):
+                data[dst_offset] = reader.read_ubyte()
+                dst_offset += 1
+
+        # 0b11######
+        elif code & 0xC0 == 0xC0:
+            count = code & 0x3f
+
+            # Large copy
+            if count < 0x3E:
+                count += 3
+                offset = reader.read_ushort()
+                for i in range(offset, offset + count):
+                    data[dst_offset] = data[i]
+                    dst_offset += 1
+
+            # Very large copy
+            elif count == 0x3F:
+                pass
+
+            else:
+                i = 1
+
+        # 0b0#######
+        elif code & 0x80 == 0:
+            count = ((code & 0x70) >> 4) + 3
+            offset = reader.read_ubyte() + ((code & 0x0F) << 8)
+            offset = dst_offset - offset
+            for i in range(offset, offset + count):
+                data[dst_offset] = data[i]
+                dst_offset += 1
+
+        else:
+            i = 1
+
+
+def decode_dcr():
+    files = ['BEHOLDER.DCR', 'CLERIC1.DCR', 'CLERIC2.DCR', 'CLERIC3.DCR', 'DRAGON.DCR', 'GUARD1.DCR', 'GUARD2.DCR', 'MAGE.DCR', 'MANTIS.DCR']
+    dcr = {}
+
+    for file in files:
+        dcr[file] =  []
+        with BinaryReader('data/{file}'.format(file=file)) as reader:
+            count = reader.read_ushort()
+            for i in range(count):
+                sides = []
+                for j in range(6):
+                    side = {
+                        "cps_x": reader.read_ubyte(),
+                        "cps_y": reader.read_ubyte(),
+                        "width": reader.read_ubyte() * 8,
+                        "height": reader.read_ubyte(),
+                        "screen_x": reader.read_ubyte(),
+                        "screen_y": reader.read_ubyte()
+                    }
+
+                    sides.append(side)
+                dcr[file].append(sides)
+
+            i = 1
+    return dcr
 
 
 def dump(name, data):
@@ -1722,21 +1991,37 @@ def gen_crimson():
 
         i = 1
 
+
 assets = {
     "items": [],
     "item_types": [],
     "item_names": [],
-    'texts': [],
+    'text.dat': [],
     'level_items': [],
     'levels': [],
-    'decorations': []
+    'dec': []
 }
 
 if __name__ == '__main__':
 
+    # PAL
+    assets['pal'] = decode_pal()
+
+    # DEC
+    assets['dec'] = decode_dec()
+
+    # VMP
+    assets['vmp'] = decode_vmp()
+
+    # VCN: graphics for the walls including the background
+    assets['vcn'] = decode_vcn()
+
+    # DCR: monster graphics
+    assets['dcr'] = decode_dcr()
+
     # TEXT.DAT
-    assets['texts'] = decode_texts()
-    dump('text.json', assets['texts'])
+    assets['text.dat'] = decode_texts()
+    dump('text.json', assets['text.dat'])
 
     # ITEMTYPE.DAT
     assets['item_types'] = decode_itemtypes()
@@ -1745,12 +2030,6 @@ if __name__ == '__main__':
     # ITEM.DAT
     assets['items'] = decode_items()
     dump('items.json', assets['items'])
-
-
-    # Savegame
-    savegame = Savegame('data/EOBDATA3.SAV')
-
-    exit()
 
     # Rebuild items in levels
     level_items = [{
@@ -1768,27 +2047,18 @@ if __name__ == '__main__':
 
     #
     assets['levels'] = decode_levels(assets)
-    dump('levels.json', assets['levels'])
+    # dump('levels.json', assets['levels'])
 
-    assets['decorations'] = decode_dec()
-    dump('decorations.json', assets['decorations'])
 
-    # generate_decorations()
-    gen_crimson()
+    # Savegame
+    savegame = Savegame('data/EOBDATA2.SAV')
+
+    draw_vmp()
+    # draw_dec()
 
     exit()
 
+    gen_crimson()
 
-
-    print(json.dumps({
-        'items': {
-            'types': assets['item_types'],
-            'names': assets['item_names'],
-            'definitions': assets.items,
-        },
-        'decorations': {
-            'definitions': assets['decorations'],
-            # 'rectangles': assets['dec_rectangles'],
-        },
-    }, indent=2, sort_keys=False))
+    exit()
 
