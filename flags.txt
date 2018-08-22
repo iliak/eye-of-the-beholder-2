@@ -9,10 +9,12 @@ Items' flags :
 0x80 :
 
 Global flags:
-0x01 :
-0x02 : Level 2
-0x03 : 
-0x04 : Level 2 trigger 47: NPC #1 : Calandra
+    01 :
+    02 : Level 2
+    03 :
+    04 : Level 2 trigger 47: NPC #1 : Calandra
+    28 : cleared when leaving darkmoon temple and entering in the forest
+    30 : entering level 1
 
 Monster's flags :
 0x01 :
@@ -76,21 +78,23 @@ Level's flags :
     7 :
     8 :
 #LEVEL4:
-    1 :
-    2 :
+    0 : "an hold, haggard woman..."
+    1 : "behind the brush you discover..."
+    2 : opened the door and try to enter further in the temple
     3 :
     4 :
-    5 : ?
-    6 : ?
-    7 :
+    5 : approching darkmoon temple
+    6 : cleared when entering darkmoon temple
+    7 : "do you whish to dig up this grave ?"
     8 :
 #LEVEL5:
-    1 :
+    0 : Talking for the first time with the clerics in the darkmoon temple
+    1 : "a woman garbed in full armor stands..."
     2 :
-    3 :
-    4 :
-    5 :
-    6 :
+    3 : Magical seal in the entrance
+    4 : Magical seal in the entrance
+    5 : Magical seal in the entrance
+    6 : Magical seal in the entrance
     7 :
     8 :
 #LEVEL6:

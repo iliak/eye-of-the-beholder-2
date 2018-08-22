@@ -371,6 +371,42 @@ class BinaryReader:
 
 class Monster:
     """
+    flags:
+    0 = default
+    1 = ?
+    2 = ?
+    3 = ?
+    4 = ?
+    5 = ?
+    6 = ?
+    7 = ?
+    8 = fear ?
+    9 = ?
+    10 = ?
+
+        01h-> Active (fighting) has attacked MO_ACT
+        02h-> is hit                        MO_HIT
+        04h-> Flipflag                      MO_FLIP
+        08h-> UNDEAD "Turned"               MO_TURNED
+        10h-> set if "turned undead"        MO_FLEE
+        20h-> turned to stone               MO_STONE
+        40h-> Inactive (at start)           MO_INACT
+
+
+    Phases:
+         -1: raise weapon
+         -2: Hit!
+          0: Move forward
+          1: Move Backwards
+          2: Move Left
+          3: Move Right
+          4: Adjust-Turn
+          5: Turn Left
+          6: Turn Right
+          7: AdjNextHit
+          8: Inactive
+          9: Walk
+         10: Is Hit
 
     """
 
@@ -752,7 +788,7 @@ class MonsterType:
         self.exp_gain = 0
         self.size = 0
         self.attack_sound = 0
-        self.mouve_sound = 0
+        self.move_sound = 0
         self.unk3 = None
         self.is_attack2 = 0
         self.distant_attack = 0
@@ -811,6 +847,10 @@ class MonsterGfx:
             "unknown1": self.unk1,
             "label": self.label
         }
+
+    def __str__(self):
+
+        return self.label
 
 
 class Trigger:
@@ -1017,7 +1057,7 @@ class Script:
             print('[0x{offset:04X}] {token}'.format(offset=offset, token=msg))
 
 
-class Maze:
+class Inf:
     """
 
     """
@@ -1034,9 +1074,9 @@ class Maze:
 
         self.width = 0
         self.height = 0
-        self.walls = []
+        # self.walls = []
 
-    def process(self, filename, assets):
+    def process(self, filename):
         """
 
         :param filename:
@@ -1106,36 +1146,6 @@ class Maze:
         #     0x3f - sewer pipe (in the middle)
         #     0x41 - rune 'entrance'
         #     0x45 - cave-in or stone portal
-
-        print("==============> Decode maze '{filename}'".format(filename=filename))
-
-        # Read wall decorations
-        with BinaryReader(filename + '.MAZ') as reader:
-            self.width = reader.read_ushort()
-            self.height = reader.read_ushort()
-            faces = reader.read_ushort()
-
-            self.walls = [[None for y in range(self.height)] for x in range(self.width)]
-
-            self.walls_set = set()
-
-            for y in range(self.height):
-                for x in range(self.width):
-                    n = reader.read_ubyte()
-                    s = reader.read_ubyte()
-                    w = reader.read_ubyte()
-                    e = reader.read_ubyte()
-
-                    self.walls_set.add(n)
-                    self.walls_set.add(s)
-                    self.walls_set.add(w)
-                    self.walls_set.add(e)
-                    self.walls[x][y] = {
-                        'n': n,
-                        's': s,
-                        'w': w,
-                        'e': e,
-                    }
 
         with BinaryReader(filename + '.INF') as reader:
 
@@ -1235,11 +1245,9 @@ class Maze:
                                 type.attack_list[i] = reader.read_ubyte()
                                 reader.read_ubyte()
 
-                        type.turn_undead_value = reader.read_ubyte()
+                        type.turn_undead_value = reader.read_byte()
                         type.unk4 = reader.read_ubyte()
-                        type.unk5[0] = reader.read_ubyte()
-                        type.unk5[1] = reader.read_ubyte()
-                        type.unk5[2] = reader.read_ubyte()
+                        type.unk5 = reader.read_ubyte(3)
 
                         header.monsterTypes.append(type)
 
@@ -1318,7 +1326,6 @@ class Maze:
                 self.triggers.append(trigger)
 
             # endregion
-            i = 1
 
     def decode(self, assets):
         return {
@@ -1331,11 +1338,45 @@ class Maze:
             "triggers": {trigger.location.coordinates(): trigger.run(self, assets) for trigger in self.triggers},
             "messages": {k: v for k, v in enumerate(self.messages)},
             "scripts": self.script.run(self, assets),
-            # "walls": self._decode_walls(),
             "monsters": [],
         }
 
-    def _decode_walls(self):
+
+class Maz:
+    """
+
+    """
+    def __init__(self):
+
+        self.width = None
+        self.height = None
+        self.faces = None
+        self.walls = []
+
+    def process(self, filename):
+        with BinaryReader('data/{file}.MAZ'.format(file=filename)) as reader:
+
+            self.width = reader.read_ushort()
+            self.height = reader.read_ushort()
+            self.faces = reader.read_ushort()
+
+            self.walls = [[None for y in range(self.height)] for x in range(self.width)]
+
+            for y in range(self.height):
+                for x in range(self.width):
+                    n = reader.read_ubyte()
+                    s = reader.read_ubyte()
+                    w = reader.read_ubyte()
+                    e = reader.read_ubyte()
+
+                    self.walls[x][y] = {
+                        'n': n,
+                        's': s,
+                        'w': w,
+                        'e': e,
+                    }
+
+    def _decode(self):
 
         blocks = [['#' for y in range(self.height)] for x in range(self.width)]
 
@@ -1674,34 +1715,63 @@ def decode_items():
     return items
 
 
-def decode_levels(assets):
+def decode_maz():
+    # Read wall decorations
+    files = [
+        'LEVEL1',
+        'LEVEL2',
+        'LEVEL3',
+        'LEVEL4',
+        'LEVEL5',
+        'LEVEL6',
+        'LEVEL7',
+        'LEVEL8',
+        'LEVEL9',
+        'LEVEL10',
+        'LEVEL11',
+        'LEVEL12',
+        'LEVEL13',
+        'LEVEL14',
+        'LEVEL15',
+    ]
+    mazes = {}
+    for file in files:
+
+        maze = Maz()
+        maze.process(file)
+        mazes[file] = maze
+
+    return mazes
+
+
+def decode_inf():
     # .INF
     files = [
         'LEVEL1',
         'LEVEL2',
         'LEVEL3',
         'LEVEL4',
-        # 'LEVEL5',
-        # 'LEVEL6',
-        # 'LEVEL7',
-        # 'LEVEL8',
-        # 'LEVEL9',
-        # 'LEVEL10',
-        # 'LEVEL11',
-        # 'LEVEL12',
-        # 'LEVEL13',
-        # 'LEVEL14',
-        # 'LEVEL15',
+        'LEVEL5',
+        'LEVEL6',
+        'LEVEL7',
+        'LEVEL8',
+        'LEVEL9',
+        'LEVEL10',
+        'LEVEL11',
+        'LEVEL12',
+        'LEVEL13',
+        'LEVEL14',
+        'LEVEL15',
+        'LEVEL16',
     ]
-    levels = {}
+    infs = {}
 
     for file in files:
-        level = Maze(file)
-        level.process('data/{file}'.format(file=file), assets)
-        levels[file] = level
-        # levels[file] = level.decode(assets)
+        inf = Inf(file)
+        inf.process('data/{file}'.format(file=file))
+        infs[file] = level
 
-    return levels
+    return infs
 
 
 def decode_dec():
@@ -1736,25 +1806,6 @@ def decode_dec():
                 decorations[file]['shapes'].append(rect)
 
     return decorations
-
-
-def draw_dec():
-    files = ['AZURE', 'BROWN', 'CRIMSON', 'FOREST', 'MEZZ', 'SILVER']
-
-    for file in files:
-        dec = assets['dec'][file + '.DEC']
-        i = 1
-
-
-
-
-def draw_vmp():
-    files = ['CRIMSON', 'DUNG', 'FOREST', 'MEZZ', 'SILVER']
-
-    for file in files:
-        vcn = assets['vcn'][file + '.VCN']
-        vmp = assets['vmp'][file + '.VMP']
-        i = 1
 
 
 def decode_texts():
@@ -1825,6 +1876,9 @@ def decode_pal():
         pal[file] = colors
 
     return pal
+
+
+
 
 
 def decode_vcn():
@@ -1914,6 +1968,9 @@ def decode_format80(reader):
             i = 1
 
 
+
+
+
 def decode_dcr():
     files = ['BEHOLDER.DCR', 'CLERIC1.DCR', 'CLERIC2.DCR', 'CLERIC3.DCR', 'DRAGON.DCR', 'GUARD1.DCR', 'GUARD2.DCR', 'MAGE.DCR', 'MANTIS.DCR']
     dcr = {}
@@ -1926,7 +1983,7 @@ def decode_dcr():
                 sides = []
                 for j in range(6):
                     side = {
-                        "cps_x": reader.read_ubyte(),
+                        "cps_x": reader.read_ubyte() * 8,
                         "cps_y": reader.read_ubyte(),
                         "width": reader.read_ubyte() * 8,
                         "height": reader.read_ubyte(),
@@ -1992,25 +2049,82 @@ def gen_crimson():
         i = 1
 
 
+def draw_dec():
+    files = ['AZURE', 'BROWN', 'CRIMSON', 'FOREST', 'MEZZ', 'SILVER']
+
+    for file in files:
+        dec = assets['dec'][file + '.DEC']
+        i = 1
+
+
+def draw_vmp():
+    files = ['CRIMSON', 'DUNG', 'FOREST', 'MEZZ', 'SILVER']
+
+    for file in files:
+        vcn = assets['vcn'][file + '.VCN']
+        vmp = assets['vmp'][file + '.VMP']
+        i = 1
+
+
+def draw_dcr():
+    files = ['BEHOLDER', 'CLERIC1', 'CLERIC2', 'CLERIC3', 'DRAGON', 'GUARD1', 'GUARD2', 'MAGE', 'MANTIS']
+    path = './data/'
+
+    for file in files:
+        dcr = assets['dcr'][file + '.DCR']
+
+        for id in range(len(dcr)):
+            data = dcr[id]
+            img = Image.open("{path}{file}.PNG".format(path=path, file=file), 'r')
+            # img.convert('RGBA')
+
+            for face in range(6):
+                d = data[face]
+
+                x = d['cps_x']
+                y = d['cps_y']
+                right = x + d['width']
+                lower =  y + d['height']
+
+                bg = Image.new('RGBA', (320, 200), (255, 0, 0, 0))
+                bg.paste(img, (0, 0))
+
+                crop = bg.crop((x, y, right, lower))
+                # crop.convert('RGBA')
+
+
+                x = d['screen_x']
+                y = d['screen_y']
+                bg.paste(crop, (x, y), )
+
+                bg.save("{path}{file}_{id}_{face}.PNG".format(path=path, file=file, id=id, face=face), format='png')
+
+            i = 1
+
+
 assets = {
     "items": [],
     "item_types": [],
     "item_names": [],
     'text.dat': [],
     'level_items': [],
-    'levels': [],
-    'dec': []
+    'inf': {},
+    'maz': {},
+    'pal': {},
+    'vmp': {},
+    'vcn': {},
+    'dec': {}
 }
 
 if __name__ == '__main__':
 
-    # PAL
+    # PAL: color palettes
     assets['pal'] = decode_pal()
 
-    # DEC
+    # DEC: decoration rectangle
     assets['dec'] = decode_dec()
 
-    # VMP
+    # VMP: information about how to put together the blocks defined in the corresponding vcn files, into proper walls
     assets['vmp'] = decode_vmp()
 
     # VCN: graphics for the walls including the background
@@ -2045,15 +2159,17 @@ if __name__ == '__main__':
     } for item in assets['items']]
     dump('level_items.json', level_items)
 
-    #
-    assets['levels'] = decode_levels(assets)
-    # dump('levels.json', assets['levels'])
+    # INF
+    assets['inf'] = decode_inf()
 
+    # MAZ
+    assets['maz'] = decode_maz()
 
     # Savegame
     savegame = Savegame('data/EOBDATA2.SAV')
 
-    draw_vmp()
+    draw_dcr()
+    # draw_vmp()
     # draw_dec()
 
     exit()
